@@ -1,0 +1,9 @@
+boto3
+opencv-python
+numpy
+pandas
+celery
+flask
+redis
+kafka-python==2.0.2
+flake8==3.9.0
