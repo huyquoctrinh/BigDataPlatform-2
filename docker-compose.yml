@@ -95,7 +95,7 @@ services:
       - ./src/consumer:/app
       - ./src/consumer/logs:/app/logs
   mongodb_container:
-    image: mongo:latest
+    image: mongo
     container_name: mongodb
     ports:
       - "27017:27017"
@@ -106,49 +106,52 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: admin123
     networks:
       - gateway
-    
-  app:
-    restart: "always"
-    build:
-      context: ./build_scripts/app_build
-      dockerfile: Dockerfile
-    container_name: app
-    ports:
-      - "5000:5000"
-    volumes:
-      - ./src:/app
-      - ./logs:/app/logs
-      - ./tmp_data:/app/tmp_data
-      - shared-volumes:/tmp/
-    depends_on:
-      redis:
-        condition: service_healthy
-    command: python3 /app/server.py
-    environment:
-      CELERY_BROKER_URL: redis://redis
-      CELERY_RESULT_BACKEND: redis://redis
-    networks:
-      - gateway
-  worker:
-    restart: "always"
-    build:
-      context: ./build_scripts/worker_process
-      dockerfile: Dockerfile
-    command: celery -A tasks worker --loglevel=INFO --concurrency=8 --logfile=/app/worker_logs/worker.log
-    environment:
-      CELERY_BROKER_URL: redis://redis
-      CELERY_RESULT_BACKEND: redis://redis
-    depends_on:
-      - redis
-      - zookeeper
-      - kafka
-    networks:
-      - gateway
-    volumes: 
-      - ./src:/app
-      - ./worker_logs:/app/worker_logs
-      - shared-volumes:/tmp/
 
+  airflow-init:
+    << : *airflow-common
+    container_name: airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db init && (
+        airflow users create
+          --role Admin
+          --username airflow
+          --password airflow
+          --email airflow@airflow.com
+          --firstname airflow
+          --lastname airflow )
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy  
+    networks:
+      - mynetwork
+
+  airflow-webserver:
+    << : *airflow-common
+    command: airflow webserver
+    ports:
+      - "8081:8080"
+    container_name: airflow_webserver
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy  
+    networks:
+      - mynetwork
+
+  airflow-scheduler:
+    << : *airflow-common
+    command: airflow scheduler
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy  
+    networks:
+      - mynetwork
+    
 networks:
   gateway:
     driver: bridge
