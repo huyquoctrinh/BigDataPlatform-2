@@ -1,5 +1,25 @@
 version: '3.8'
 
+# x-airflow-common:
+#   &airflow-common
+#   image: apache/airflow:2.7.1
+#   environment:
+#     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+#     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://myuser:mypassword@postgres:5432/mydb
+#     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+#     - AIRFLOW__CORE__LOGGING_LEVEL=INFO
+#   volumes:
+#     - ./orchestration/dags:/opt/airflow/dags
+#     - ./orchestration/logs:/opt/airflow/logs
+#     - ./etl:/opt/airflow/plugins
+#     - ./orchestration/airflow.cfg:/opt/airflow/airflow.cfg
+#     - ./config.ini:/opt/airflow/plugins
+#   depends_on:
+#     postgres:
+#       condition: service_healthy  
+#   networks:
+#     - mynetwork
+
 services:
   redis:
     restart: always
@@ -77,23 +97,23 @@ services:
     networks:
       - gateway
   
-  consumer:
-    container_name: consumer
-    build:
-      context: ./build_scripts/kafka
-      dockerfile: Dockerfile
-    ports:
-      - 8001:8001
-    restart: "always"
-    depends_on:
-      - kafka
-      - zookeeper
-    networks:
-      - gateway
-    command: python3 /app/kafka_consumer.py
-    volumes:
-      - ./src/consumer:/app
-      - ./src/consumer/logs:/app/logs
+  # consumer:
+  #   container_name: consumer
+  #   build:
+  #     context: ./build_scripts/kafka
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - 8001:8001
+  #   restart: "always"
+  #   depends_on:
+  #     - kafka
+  #     - zookeeper
+  #   networks:
+  #     - gateway
+  #   command: python3 /app/kafka_consumer.py
+  #   volumes:
+  #     - ./src/consumer:/app
+  #     - ./src/consumer/logs:/app/logs
   mongodb_container:
     image: mongo
     container_name: mongodb
@@ -107,51 +127,83 @@ services:
     networks:
       - gateway
 
-  airflow-init:
-    << : *airflow-common
-    container_name: airflow_init
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - airflow db init && (
-        airflow users create
-          --role Admin
-          --username airflow
-          --password airflow
-          --email airflow@airflow.com
-          --firstname airflow
-          --lastname airflow )
-    restart: on-failure
-    depends_on:
-      postgres:
-        condition: service_healthy  
-    networks:
-      - mynetwork
+  # airflow-init:
+  #   image: apache/airflow:2.7.1
+  #   container_name: airflow_init
+  #   entrypoint: /bin/bash
+  #   command:
+  #     - -c
+  #     - airflow db init && (
+  #       airflow users create
+  #         --role Admin
+  #         --username airflow
+  #         --password airflow
+  #         --email airflow@airflow.com
+  #         --firstname airflow
+  #         --lastname airflow )
+  #   restart: on-failure
 
-  airflow-webserver:
-    << : *airflow-common
-    command: airflow webserver
+  #   networks:
+  #     - gateway
+  # airflow-webserver:
+  #   image: apache/airflow:2.7.1
+  #   command: airflow webserver
+  #   ports:
+  #     - "8081:8080"
+  #   container_name: airflow_webserver
+  #   restart: always 
+  #   networks:
+  #     - gateway
+
+  # airflow-scheduler:
+  #   image: apache/airflow:2.7.1
+  #   command: airflow scheduler
+  #   container_name: airflow_scheduler
+  #   restart: always
+  #   networks:
+  #     - gateway
+  worker:
+    restart: "always"
+    build:
+      context: ./build_scripts/worker_process
+      dockerfile: Dockerfile
+    command: celery -A tasks worker --loglevel=DEBUG -E --logfile=/app/worker_logs/celery.log
+    environment:
+      CELERY_BROKER_URL: redis://redis
+      CELERY_RESULT_BACKEND: redis://redis
+    depends_on:
+      - redis
+      - zookeeper
+      - kafka
+    networks:
+      - gateway
+    volumes: 
+      - ./src:/app
+      - ./worker_logs:/app/worker_logs
+      - shared-volumes:/tmp/
+  app:
+    # restart: "always"
+    build:
+      context: ./build_scripts/app_build
+      dockerfile: Dockerfile
+    container_name: app
     ports:
-      - "8081:8080"
-    container_name: airflow_webserver
-    restart: always
+      - "5000:5000"
+    volumes:
+      - ./src:/app
+      - ./logs:/app/logs
+      - ./tmp_data:/app/tmp_data
+      - shared-volumes:/app/tenants_data
     depends_on:
-      postgres:
-        condition: service_healthy  
+      redis:
+        condition: service_healthy
+    command: python3 /app/app.py
+    environment:
+      CELERY_BROKER_URL: redis://redis
+      CELERY_RESULT_BACKEND: redis://redis
     networks:
-      - mynetwork
+      - gateway
 
-  airflow-scheduler:
-    << : *airflow-common
-    command: airflow scheduler
-    container_name: airflow_scheduler
-    restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy  
-    networks:
-      - mynetwork
-    
 networks:
   gateway:
     driver: bridge

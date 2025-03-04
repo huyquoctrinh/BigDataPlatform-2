@@ -1,7 +1,6 @@
 from pymongo import MongoClient
 
 class AtlasClient ():
-
     def __init__ (
         self, 
         altas_uri, 

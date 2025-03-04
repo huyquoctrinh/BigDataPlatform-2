@@ -7,3 +7,4 @@ flask
 redis
 kafka-python==2.0.2
 flake8==3.9.0
+python-dotenv
